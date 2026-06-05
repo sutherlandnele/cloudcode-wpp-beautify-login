@@ -1,5 +1,25 @@
 # Cloudcode Beautify Login
 
+## Important v1.0.4 Fix
+
+This release fixes the issue where changing the custom login slug from `beautify-login` to another value, such as `naik-login`, could show a 404 page.
+
+The plugin now automatically updates the Cloudcode Beautify Login block in `.htaccess` when the login slug changes.
+
+The generated block looks like this:
+
+```apache
+# BEGIN Cloudcode Beautify Login
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteRule ^naik-login/?$ wp-login.php [QSA,L]
+</IfModule>
+# END Cloudcode Beautify Login
+```
+
+The block is written **before** the normal WordPress rewrite block so Apache reaches the custom login rule before WordPress' catch-all `index.php` rule.
+
+
 Cloudcode Beautify Login hides the default WordPress login URL and beautifies the WordPress login page using custom text, colors, links, and CSS.
 
 ## Important Note for v1.0.3
@@ -83,3 +103,13 @@ Then log in normally through `/wp-login.php`.
 ## License
 
 GPLv2 or later.
+
+
+## Changelog
+
+### 1.0.4
+
+- Automatically updates the `.htaccess` rewrite rule when the custom login slug changes.
+- Places the Cloudcode Beautify Login rewrite block before the normal WordPress rewrite block.
+- Removes old Cloudcode Beautify Login rewrite blocks before writing the new one.
+- Keeps the working v1.0.3 login, logout, Register URL, Lost Password URL, and Custom CSS behavior.
