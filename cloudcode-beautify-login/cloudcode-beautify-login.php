@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name: Cloudcode Beautify Login
- * Plugin URI: https://www.cloudcode.com.pg/
+ * Plugin URI: https://github.com/sutherlandnele/cloudcode-wpp-beautify-login
  * Description: Hide the default WordPress login URL and beautify the WordPress login screen with a button text, colors, title, message, custom CSS, and configurable Register/Lost Password links. Automatically updates the .htaccess rewrite rule when the custom login slug changes.
  * Version: 1.0.4
  * Author: Cloudcode PNG Limited
@@ -161,15 +161,15 @@ final class Cloudcode_Beautify_Login {
     public static function static_update_htaccess_rule() {
         $htaccess_file = self::static_get_htaccess_path();
 
-        if (!file_exists($htaccess_file)) {
-            @touch($htaccess_file);
+        if (!self::filesystem_exists($htaccess_file)) {
+            @self::filesystem_put_contents($htaccess_file, '');
         }
 
-        if (!is_writable($htaccess_file)) {
+        if (!self::filesystem_is_writable($htaccess_file)) {
             return false;
         }
 
-        $content = file_get_contents($htaccess_file);
+        $content = self::filesystem_get_contents($htaccess_file);
 
         if ($content === false) {
             $content = '';
@@ -189,17 +189,17 @@ final class Cloudcode_Beautify_Login {
             $content = $block . $content;
         }
 
-        return file_put_contents($htaccess_file, $content, LOCK_EX) !== false;
+        return self::filesystem_put_contents($htaccess_file, $content, LOCK_EX) !== false;
     }
 
     public static function static_remove_htaccess_rule() {
         $htaccess_file = self::static_get_htaccess_path();
 
-        if (!file_exists($htaccess_file) || !is_writable($htaccess_file)) {
+        if (!self::filesystem_exists($htaccess_file) || !self::filesystem_is_writable($htaccess_file)) {
             return false;
         }
 
-        $content = file_get_contents($htaccess_file);
+        $content = self::filesystem_get_contents($htaccess_file);
 
         if ($content === false) {
             return false;
@@ -207,7 +207,7 @@ final class Cloudcode_Beautify_Login {
 
         $content = self::static_remove_htaccess_block_from_content($content);
 
-        return file_put_contents($htaccess_file, $content, LOCK_EX) !== false;
+        return self::filesystem_put_contents($htaccess_file, $content, LOCK_EX) !== false;
     }
 
     public function update_htaccess_after_slug_change($old_value, $value, $option) {
@@ -390,12 +390,12 @@ final class Cloudcode_Beautify_Login {
     }
 
     private function current_relative_path() {
-        $request_uri = isset($_SERVER['REQUEST_URI']) ? wp_unslash($_SERVER['REQUEST_URI']) : '';
-        $path = parse_url($request_uri, PHP_URL_PATH);
+        $request_uri = isset($_SERVER['REQUEST_URI']) ? sanitize_text_field(wp_unslash($_SERVER['REQUEST_URI'])) : '';
+        $path = wp_parse_url($request_uri, PHP_URL_PATH);
         $path = is_string($path) ? $path : '';
         $path = trim($path, '/');
 
-        $home_path = parse_url(home_url('/'), PHP_URL_PATH);
+        $home_path = wp_parse_url(home_url('/'), PHP_URL_PATH);
         $home_path = is_string($home_path) ? trim($home_path, '/') : '';
 
         if ($home_path !== '' && $path === $home_path) {
@@ -536,7 +536,7 @@ final class Cloudcode_Beautify_Login {
             return $url;
         }
 
-        $parts = parse_url($url);
+        $parts = wp_parse_url($url);
         $query = !empty($parts['query']) ? '?' . $parts['query'] : '';
 
         return home_url('/' . $this->get_login_slug() . '/' . $query, $scheme);
@@ -575,7 +575,7 @@ final class Cloudcode_Beautify_Login {
         ?>
         <style type="text/css" id="cloudcode-beautify-login-css">
             :root {
-                --cbuf-primary: <?php echo $primary_color; ?>;
+                --cbuf-primary: <?php echo esc_attr($primary_color); ?>;
                 --cbuf-primary-dark: <?php echo esc_attr($this->darken_hex_color($primary_color, 22)); ?>;
             }
 
@@ -792,6 +792,63 @@ final class Cloudcode_Beautify_Login {
         );
     }
 
+
+    private static function ensure_wp_filesystem() {
+        global $wp_filesystem;
+
+        if (class_exists('WP_Filesystem_Base') && $wp_filesystem instanceof WP_Filesystem_Base) {
+            return true;
+        }
+
+        if (!function_exists('WP_Filesystem')) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+        }
+
+        return WP_Filesystem();
+    }
+
+    private static function filesystem_exists($path) {
+        global $wp_filesystem;
+
+        if (!self::ensure_wp_filesystem()) {
+            return false;
+        }
+
+        return $wp_filesystem->exists($path);
+    }
+
+    private static function filesystem_get_contents($path) {
+        global $wp_filesystem;
+
+        if (!self::ensure_wp_filesystem()) {
+            return false;
+        }
+
+        return $wp_filesystem->get_contents($path);
+    }
+
+    private static function filesystem_put_contents($path, $contents) {
+        global $wp_filesystem;
+
+        if (!self::ensure_wp_filesystem()) {
+            return false;
+        }
+
+        return $wp_filesystem->put_contents($path, $contents, FS_CHMOD_FILE);
+    }
+
+    private static function filesystem_is_writable($path) {
+        global $wp_filesystem;
+
+        if (!self::ensure_wp_filesystem()) {
+            return false;
+        }
+
+        $target = $wp_filesystem->exists($path) ? $path : dirname($path);
+
+        return $wp_filesystem->is_writable($target);
+    }
+
     public function render_settings_page() {
         if (!current_user_can('manage_options')) {
             return;
@@ -806,7 +863,7 @@ final class Cloudcode_Beautify_Login {
 
             <div style="background:#fff;border-left:4px solid #2271b1;padding:14px 18px;margin:18px 0;max-width:900px;">
                 <strong><?php echo esc_html__('Current login URL:', 'cloudcode-beautify-login'); ?></strong><br>
-                <a href="<?php echo $login_url; ?>" target="_blank" rel="noopener"><?php echo $login_url; ?></a>
+                <a href="<?php echo esc_url($login_url); ?>" target="_blank" rel="noopener"><?php echo esc_html($login_url); ?></a>
             </div>
 
             <div style="background:#fff;border-left:4px solid #46b450;padding:12px 18px;margin:18px 0;max-width:900px;">
