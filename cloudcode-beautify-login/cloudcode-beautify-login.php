@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Cloudcode Beautify Login
  * Plugin URI: https://www.cloudcode.com.pg/
- * Description: Hide the default WordPress login URL and beautify the WordPress login screen with a button text, colors, title, message, custom CSS, and configurable Register/Lost Password links.
- * Version: 1.0.3
+ * Description: Hide the default WordPress login URL and beautify the WordPress login screen with a button text, colors, title, message, custom CSS, and configurable Register/Lost Password links. Automatically updates the .htaccess rewrite rule when the custom login slug changes.
+ * Version: 1.0.4
  * Author: Cloudcode PNG Limited
  * Author URI: https://www.cloudcode.com.pg/
  * License: GPLv2 or later
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class Cloudcode_Beautify_Login {
-    const VERSION = '1.0.3';
+    const VERSION = '1.0.4';
 
     const OPTION_LOGIN_SLUG      = 'cbuf_login_slug';
     const OPTION_REDIRECT_TO     = 'cbuf_redirect_to';
@@ -95,10 +95,12 @@ final class Cloudcode_Beautify_Login {
         }
 
         self::static_add_login_rewrite_rule();
+        self::static_update_htaccess_rule();
         flush_rewrite_rules();
     }
 
     public static function deactivate() {
+        self::static_remove_htaccess_rule();
         flush_rewrite_rules();
     }
 
@@ -119,8 +121,105 @@ final class Cloudcode_Beautify_Login {
         self::static_add_login_rewrite_rule();
     }
 
+    private static function static_get_htaccess_path() {
+        if (!function_exists('get_home_path')) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+        }
+
+        $home_path = get_home_path();
+
+        if (empty($home_path)) {
+            $home_path = ABSPATH;
+        }
+
+        return trailingslashit($home_path) . '.htaccess';
+    }
+
+    private static function static_get_htaccess_block() {
+        $slug = self::static_get_login_slug();
+
+        $lines = array(
+            '# BEGIN Cloudcode Beautify Login',
+            '<IfModule mod_rewrite.c>',
+            'RewriteEngine On',
+            'RewriteRule ^' . preg_quote($slug, '/') . '/?$ wp-login.php [QSA,L]',
+            '</IfModule>',
+            '# END Cloudcode Beautify Login',
+        );
+
+        return implode(PHP_EOL, $lines) . PHP_EOL . PHP_EOL;
+    }
+
+    private static function static_remove_htaccess_block_from_content($content) {
+        return preg_replace(
+            '/# BEGIN Cloudcode Beautify Login\s*.*?# END Cloudcode Beautify Login\s*/s',
+            '',
+            (string) $content
+        );
+    }
+
+    public static function static_update_htaccess_rule() {
+        $htaccess_file = self::static_get_htaccess_path();
+
+        if (!file_exists($htaccess_file)) {
+            @touch($htaccess_file);
+        }
+
+        if (!is_writable($htaccess_file)) {
+            return false;
+        }
+
+        $content = file_get_contents($htaccess_file);
+
+        if ($content === false) {
+            $content = '';
+        }
+
+        $content = self::static_remove_htaccess_block_from_content($content);
+        $block   = self::static_get_htaccess_block();
+
+        /*
+         * Put the custom login rule BEFORE the normal WordPress rewrite block.
+         * If it is placed after WordPress' catch-all index.php rule, Apache may
+         * never reach it and the custom login URL can show a 404 page.
+         */
+        if (strpos($content, '# BEGIN WordPress') !== false) {
+            $content = preg_replace('/# BEGIN WordPress/', $block . '# BEGIN WordPress', $content, 1);
+        } else {
+            $content = $block . $content;
+        }
+
+        return file_put_contents($htaccess_file, $content, LOCK_EX) !== false;
+    }
+
+    public static function static_remove_htaccess_rule() {
+        $htaccess_file = self::static_get_htaccess_path();
+
+        if (!file_exists($htaccess_file) || !is_writable($htaccess_file)) {
+            return false;
+        }
+
+        $content = file_get_contents($htaccess_file);
+
+        if ($content === false) {
+            return false;
+        }
+
+        $content = self::static_remove_htaccess_block_from_content($content);
+
+        return file_put_contents($htaccess_file, $content, LOCK_EX) !== false;
+    }
+
+    public function update_htaccess_after_slug_change($old_value, $value, $option) {
+        self::static_add_login_rewrite_rule();
+        self::static_update_htaccess_rule();
+        flush_rewrite_rules(false);
+    }
+
     public function maybe_flush_rewrite_rules() {
         if (get_option(self::OPTION_FLUSH_NEEDED) === 'yes') {
+            self::static_add_login_rewrite_rule();
+            self::static_update_htaccess_rule();
             flush_rewrite_rules(false);
             delete_option(self::OPTION_FLUSH_NEEDED);
         }
@@ -182,6 +281,7 @@ final class Cloudcode_Beautify_Login {
         ));
 
         add_action('update_option_' . self::OPTION_LOGIN_SLUG, array($this, 'mark_rewrite_flush_needed'), 10, 3);
+        add_action('update_option_' . self::OPTION_LOGIN_SLUG, array($this, 'update_htaccess_after_slug_change'), 20, 3);
     }
 
     public function add_plugin_action_links($links) {
@@ -707,6 +807,11 @@ final class Cloudcode_Beautify_Login {
             <div style="background:#fff;border-left:4px solid #2271b1;padding:14px 18px;margin:18px 0;max-width:900px;">
                 <strong><?php echo esc_html__('Current login URL:', 'cloudcode-beautify-login'); ?></strong><br>
                 <a href="<?php echo $login_url; ?>" target="_blank" rel="noopener"><?php echo $login_url; ?></a>
+            </div>
+
+            <div style="background:#fff;border-left:4px solid #46b450;padding:12px 18px;margin:18px 0;max-width:900px;">
+                <strong><?php echo esc_html__('Rewrite rule:', 'cloudcode-beautify-login'); ?></strong>
+                <?php echo esc_html__('When you save a new login slug, this plugin updates the Cloudcode Beautify Login block in your .htaccess file automatically, before the normal WordPress rewrite block.', 'cloudcode-beautify-login'); ?>
             </div>
 
             <form method="post" action="options.php">
